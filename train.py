@@ -20,14 +20,14 @@ if __name__ == '__main__':
     # 构建相对路径
     yaml_path = 'VisDrone.yaml'
     check_path(yaml_path)
-    model = RTDETR('')
+    model = RTDETR('/ultralytics/cfg/models/detr_backbone_SAFM_CSAF.yaml')
     model.train(data=str(yaml_path),
                 cache=False,
                 imgsz=640,
                 epochs=300,
                 batch=8,
                 workers=8,
-                #device='0,1',tn
+                #device='0,1',
                 #resume='', # last.pt path
                 project='runs/train',
                 name='DETR',
