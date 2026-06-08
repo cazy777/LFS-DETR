@@ -1,0 +1,55 @@
+nc: 80
+
+scales:
+  l: [1.00, 1.00, 1024]
+
+backbone:
+  - [-1, 1, ConvNormLayer, [32, 3, 2, None, False, 'relu']]  # 0-P1/2
+  - [-1, 1, ConvNormLayer, [32, 3, 1, None, False, 'relu']]  # 1
+  - [-1, 1, ConvNormLayer, [64, 3, 1, None, False, 'relu']]  # 2
+  # 原 MaxPool2d -> 抗混叠下采样（不改特征图尺度）
+  - [-1, 1, BlurPool2d,    [2, 3]]                            # 3-P2/4
+
+  - [-1, 1, Blocks, [64,  BasicBlock, 2, 2, 'relu']]         # 4
+  - [-1, 1, Blocks, [128, BasicBlock, 2, 3, 'relu']]         # 5-P3/8
+  - [-1, 1, Blocks, [256, BasicBlock, 2, 4, 'relu']]         # 6-P4/16
+  - [-1, 1, Blocks, [512, BasicBlock, 2, 5, 'relu']]         # 7-P5/32
+
+head:
+  # P5 分支
+  - [-1, 1, Conv, [256, 1, 1, None, 1, 1, False]]            # 8  P5->256
+  - [-1, 1, MSFA_Lite, [0.25, [1, 2]]]                       # 9  轻量 MSFA(保持通道)
+  - [-1, 1, Conv, [256, 1, 1]]                               # 10 Y5 lateral
+
+  # P5 -> P4 融合
+  - [-1, 1, DySample, [2, 'lp']]                             # 11 上采样
+  - [6,   1, Conv, [256, 1, 1, None, 1, 1, False]]           # 12 P4->256
+  - [[-2, -1], 1, Concat, [1]]                               # 13 concat(P5↑, P4)
+  - [-1, 3, C3Ghost, [256, 0.5]]                             # 14 融合块 (P4尺度)
+  - [-1, 1, SimAM3D, []]                                     # 15 ★注意力(替代后续引用)
+
+  # P4 -> P3 融合
+  - [-1, 1, DySample, [2, 'lp']]                             # 16 上采样
+  - [4,   1, Focus, [128, 1]]                                # 17 P3微调
+  - [[-1, -2, 5], 1, Concat, [1]]                            # 18 concat(P3增强, P4↑, P3原)
+  - [-1, 1, MSFA_Lite, [0.25, [1, 2]]]                       # 19 轻量 MSFA(in=384)
+  - [-1, 3, C3Ghost, [256, 0.5]]                             # 20 融合块 (P3尺度)
+  - [-1, 1, SimAM3D, []]                                     # 21 ★注意力(替代后续引用)
+
+  # 自顶向下再回传（P3->P4）
+  - [-1, 1, FFD_Lite, [256]]                                 # 22 频引导下采样到 P4 尺度
+  - [[-1, 15], 1, Concat, [1]]                               # 23 concat(当前, P4注意力)
+  - [-1, 3, C3Ghost, [256, 0.5]]                             # 24 融合块 (P4最终)
+  - [-1, 1, SimAM3D, []]                                     # 25 ★注意力(供解码器用)
+
+  # 再次下采样到 P5
+  - [-1, 1, FFD_Lite, [256]]                                 # 26 下采样到 P5 尺度
+  - [[-1, 10], 1, Concat, [1]]                               # 27 concat(当前, Y5 lateral)
+  - [-1, 3, C3Ghost, [256, 0.5]]                             # 28 融合块 (P5最终)
+  - [-1, 1, SimAM3D, []]                                     # 29 ★注意力(供解码器用)
+
+  # 语义对齐：P3 <- P5（使用注意力后的特征）
+  - [[21, -1], 1, SACi, [256, 256, 256]]                     # 30  对齐到 P3/8
+
+  # 解码（严格使用注意力后的三尺度：P3, P4, P5）
+  - [[30, 25, 29], 1, RTDETRDecoder, [nc, 256, 300, 4, 8, 3]] # 31  RTDETRDecoder(P3,P4,P5)

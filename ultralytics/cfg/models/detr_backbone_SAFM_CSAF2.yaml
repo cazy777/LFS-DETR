@@ -1,0 +1,51 @@
+nc: 10
+scales:
+  l: [1.0, 1.0, 1024]
+
+# [Backbone]
+backbone:
+  # Stem
+  - [-1, 1, ConvNormLayer, [32, 3, 2, None, False, 'relu']]
+  - [-1, 1, ConvNormLayer, [32, 3, 1, None, False, 'relu']]
+  - [-1, 1, ConvNormLayer, [64, 3, 1, None, False, 'relu']]
+  - [-1, 1, BlurPool2d,    [2, 3]]
+
+  # Stages
+  - [-1, 1, Blocks, [64,  LAHF,   2, 2, 'relu']]
+  - [-1, 1, Blocks, [128, LAHF, 2, 3, 'relu']]
+  - [-1, 1, Blocks, [256, LAHF,   2, 4, 'relu']]
+  - [-1, 1, Blocks, [512, LAHF,   2, 5, 'relu']]
+
+# [Head]
+head:
+  # P5
+  - [-1, 1, Conv, [256, 1, 1, None, 1, 1, False]]
+  - [-1, 1, SAFM, [0.25, [1, 3], 1e-4]]
+  - [-1, 1, Conv, [256, 1, 1]]
+
+  # P5 -> P4
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [6,   1, Conv, [256, 1, 1, None, 1, 1, False]]
+  - [[-2, -1], 1, CSAF, [4, 3, 1.0]]
+  - [-1, 3, RepC3, [256, 0.5]]
+  - [-1, 1, Conv,  [256, 1, 1]]
+
+  # P4 -> P3
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [5,   1, Conv, [256, 1, 1, None, 1, 1, False]]
+  - [[-2, -1], 1, CSAF, [4, 3, 1.0]]
+  - [-1, 1, SAFM, [0.25, [1, 3], 1e-4]]
+  - [-1, 3, RepC3, [256, 0.5]]
+
+  # Bottom-up: P3 -> P4
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[15, -1], 1, CSAF, [4, 3, 1.0]]
+  - [-1, 3, RepC3, [256, 0.5]]
+
+  # Bottom-up: P4 -> P5
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[10, -1], 1, CSAF, [4, 3, 1.0]]
+  - [-1, 3, RepC3, [256, 0.5]]
+
+  # [Decoder]
+  - [[20, 23, 26], 1, RTDETRDecoder, [nc, 256, 400, 4, 8, 3]]
